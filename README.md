@@ -17,9 +17,11 @@ This project demonstrates real-world iOS system behavior, Apple privacy rules, a
 - ✅ Apple App Store–compliant approach
 
 ---
-<video width="300" controls>
-  <source src="https://github.com/user-attachments/assets/8ca0ac43-e1ae-4d0b-8321-b3c8c08bc15e" type="video/mp4">
-</video>
+
+https://github.com/user-attachments/assets/c615e8cb-66f7-422b-a0dc-821c8259c1ea
+
+
+ 
 ## 🧠 How the App Works (High Level)
 
 1. **User connects to a Wi-Fi network** (Home / Office)
