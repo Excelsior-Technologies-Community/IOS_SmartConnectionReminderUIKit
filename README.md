@@ -72,9 +72,22 @@ SmartConnectionReminderUIKit
 - Requests notification permission
 - Registers notification delegate so banners show even when app is active
 
+**Key code:**
+```swift
+NotificationManager.shared.requestPermission()
+UNUserNotificationCenter.current().delegate = NotificationDelegate()
+```
+
 ### 🔹 SceneDelegate.swift
 - Sets up the app window
 - Embeds `ViewController` inside a `UINavigationController`
+
+**Key code:**
+```swift
+window.rootViewController = UINavigationController(
+    rootViewController: ViewController()
+)
+```
 
 ### 🔹 ViewController.swift
 
@@ -85,24 +98,44 @@ SmartConnectionReminderUIKit
 - Observes network changes using Combine
 - Triggers save and notification logic via `SafeWiFiStore`
 
+**Key implementation:**
+```swift
+// Observe Wi-Fi state changes using Combine
+networkMonitor.$isOnWiFi
+    .receive(on: DispatchQueue.main)
+    .sink { [weak self] isOnWiFi in
+        if isOnWiFi {
+            self?.store.onWiFiConnected()
+        } else {
+            self?.store.onWiFiDisconnected()
+        }
+    }
+```
+
 **UIKit components used:**
 - `UIViewController`
-- `UITableView`
-- `UIStackView`
+- `UITableView` (for item selection)
+- `UIStackView` (for layout)
 - `UIButton`
 - `UILabel`
 
 ### 🔹 NetworkMonitor.swift
 
-Uses `NWPathMonitor` to detect network changes:
-- Wi-Fi connected
-- Wi-Fi disconnected
+Uses `NWPathMonitor` to detect network changes in real-time.
 
+**Key code:**
 ```swift
-path.usesInterfaceType(.wifi)
+private let monitor = NWPathMonitor()
+
+monitor.pathUpdateHandler = { path in
+    DispatchQueue.main.async {
+        self.isOnWiFi = path.usesInterfaceType(.wifi)
+    }
+}
+monitor.start(queue: queue)
 ```
 
-This is the Apple-recommended API for network monitoring.
+This is the Apple-recommended API for network monitoring and publishes Wi-Fi state changes via `@Published var isOnWiFi`.
 
 ### 🔹 SafeWiFiStore.swift (Core Logic)
 
@@ -114,6 +147,32 @@ This is the Apple-recommended API for network monitoring.
 - Loads saved items on Wi-Fi reconnect
 - Sends notification on Wi-Fi disconnect
 
+**Key methods:**
+
+**1. Marking a Wi-Fi as safe:**
+```swift
+func markCurrentWiFiSafe() {
+    let ssid = WiFiHelper.currentSSID() ?? "WiFi_\(Date().timeIntervalSince1970)"
+    wifiData[ssid] = Array(selectedItems)
+    safeNetworks.append(ssid)
+    save() // Persist to UserDefaults
+}
+```
+
+**2. Handling Wi-Fi disconnect:**
+```swift
+func onWiFiDisconnected() {
+    guard wasOnWiFi, let ssid = lastKnownSSID else { return }
+    guard safeNetworks.contains(ssid) else { return }
+    
+    let items = wifiData[ssid] ?? []
+    NotificationManager.shared.send(
+        title: "🚶 You're leaving",
+        body: "Don't forget your \(items.joined(separator: ", "))"
+    )
+}
+```
+
 **Internal storage format:**
 ```json
 {
@@ -124,10 +183,20 @@ This is the Apple-recommended API for network monitoring.
 
 ### 🔹 WiFiHelper.swift
 
-Fetches the current Wi-Fi name (SSID) using:
+Fetches the current Wi-Fi name (SSID) using Apple's network APIs.
 
+**Key code:**
 ```swift
-CNCopyCurrentNetworkInfo
+static func currentSSID() -> String? {
+    guard let interfaces = CNCopySupportedInterfaces() as? [String] else { return nil }
+    
+    for interface in interfaces {
+        if let info = CNCopyCurrentNetworkInfo(interface as CFString) as NSDictionary? {
+            return info[kCNNetworkInfoKeySSID as String] as? String
+        }
+    }
+    return nil
+}
 ```
 
 **⚠️ Requires:**
@@ -139,20 +208,73 @@ CNCopyCurrentNetworkInfo
 
 Requests location permission, which iOS requires to access Wi-Fi information.
 
+**Key code:**
 ```swift
-manager.requestWhenInUseAuthorization()
+private let manager = CLLocationManager()
+
+override init() {
+    super.init()
+    manager.delegate = self
+    manager.requestWhenInUseAuthorization()
+}
 ```
+
+Without location permission, `currentSSID()` returns `nil`.
 
 ### 🔹 NotificationManager.swift
 
-Handles:
-- Notification permission request
-- Local notification scheduling
+Handles local notification scheduling and permission requests.
 
-**Uses:**
-- `UNUserNotificationCenter`
-- `UNNotificationRequest`
-- `UNTimeIntervalNotificationTrigger`
+**Key methods:**
+
+**1. Request permission:**
+```swift
+func requestPermission() {
+    UNUserNotificationCenter.current()
+        .requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            print("🔔 Notification permission:", granted)
+        }
+}
+```
+
+**2. Send notification:**
+```swift
+func send(title: String, body: String) {
+    let content = UNMutableNotificationContent()
+    content.title = title
+    content.body = body
+    content.sound = .default
+    
+    let trigger = UNTimeIntervalNotificationTrigger(
+        timeInterval: 1,
+        repeats: false
+    )
+    
+    let request = UNNotificationRequest(
+        identifier: UUID().uuidString,
+        content: content,
+        trigger: trigger
+    )
+    
+    UNUserNotificationCenter.current().add(request)
+}
+```
+
+Notifications appear 1 second after Wi-Fi disconnect.
+
+### 🔹 WiFiHelper.swift (NotificationDelegate)
+
+Ensures notifications appear as banners even when the app is in the foreground.
+
+**Key code:**
+```swift
+func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification
+) async -> UNNotificationPresentationOptions {
+    [.banner, .sound]
+}
+```
 
 ---
 
@@ -201,6 +323,13 @@ Don't forget your Wallet, Keys
 - ✔ Allow Location & Notification permissions
 - ✔ Keep app in foreground or background (do not force kill)
 
+**Testing flow:**
+1. Connect to Wi-Fi
+2. Select items (Wallet, Keys)
+3. Tap "Mark Current Wi-Fi as Safe"
+4. Turn off Wi-Fi or walk away from network
+5. Notification appears: "Don't forget your Wallet, Keys"
+
 ---
 
 ## 🎯 Use Cases
@@ -216,10 +345,11 @@ Don't forget your Wallet, Keys
 ## 🧩 Technologies Used
 
 - **UIKit** - Traditional iOS UI framework
-- **Combine** - Reactive programming
-- **Network framework** - Wi-Fi monitoring
-- **CoreLocation** - Location permissions
+- **Combine** - Reactive programming for state observation
+- **Network framework** - Wi-Fi monitoring via `NWPathMonitor`
+- **CoreLocation** - Location permissions for SSID access
 - **UserNotifications** - Local notifications
+- **SystemConfiguration** - Wi-Fi SSID retrieval
 
 ---
 
@@ -253,9 +383,16 @@ This project is also available in **SwiftUI**. Both versions share the same busi
 
 Smart Connection Reminder (UIKit) is a practical example of building a Wi-Fi–aware reminder system using UIKit while respecting Apple's privacy policies. It demonstrates how to work with system frameworks, persistence, and notifications in a real-world iOS app.
 
+The project showcases:
+- Network monitoring with `NWPathMonitor`
+- Wi-Fi SSID detection with proper permissions
+- Data persistence with `UserDefaults`
+- Local notifications with `UNUserNotificationCenter`
+- Reactive UI updates with Combine
+- Clean architecture separating UI from business logic
+
 ---
 
 ## 📝 License
 
-This project is available for educational and demonstration purposes.
- 
+This project is available for educational and demonstration purposes. 
