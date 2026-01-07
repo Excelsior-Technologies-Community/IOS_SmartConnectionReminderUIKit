@@ -18,6 +18,10 @@ This project demonstrates real-world iOS system behavior, Apple privacy rules, a
 
 ---
 
+https://github.com/user-attachments/assets/c615e8cb-66f7-422b-a0dc-821c8259c1ea
+
+
+ 
 ## 🧠 How the App Works (High Level)
 
 1. **User connects to a Wi-Fi network** (Home / Office)
